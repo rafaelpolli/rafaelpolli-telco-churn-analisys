@@ -1,0 +1,218 @@
+---
+title: "Telco Churn Analysis"
+output: github_document
+---
+
+
+```{r warning = FALSE}
+library(ggplot2)
+library(skimr)
+library(gridExtra)
+library(GGally)
+library(fastDummies)
+library(dummies)
+library(caret)
+```
+
+## Importando dataset
+
+```{r}
+telco <- read.table(file = "WA_Fn-UseC_-Telco-Customer-Churn.csv", header = T, sep = ",")
+head(telco)
+str(telco)
+```
+
+## Ajustando categoria da variável SeniorCitizen
+
+```{r}
+telco$SeniorCitizen <- as.factor(telco$SeniorCitizen)
+telco$customerID <- NULL
+```
+
+## Visualizando informações do dataset
+
+```{r}
+summary(telco)
+skim(telco)
+```
+
+# Variáveis quantitativas
+## Valores pagos e tempo de serviço
+
+```{r fig1, fig.height = 4, fig.width = 12}
+grid.arrange(ggplot(telco, aes(y = MonthlyCharges)) + 
+               geom_boxplot(),
+             ggplot(telco, aes(y = TotalCharges)) + 
+               geom_boxplot(),
+             ggplot(telco, aes(y = tenure)) + 
+               geom_boxplot(), ncol=3)
+
+grid.arrange(ggplot(telco, aes(x = MonthlyCharges, fill = Churn)) + 
+               geom_histogram(),
+             ggplot(telco, aes(x = TotalCharges, fill = Churn)) + 
+               geom_histogram(),
+             ggplot(telco, aes(x = tenure, fill = Churn)) + 
+               geom_histogram(), ncol=3)
+```
+
+## Correlação
+
+```{r fig2, fig.height = 3, fig.width = 7}
+ggcorr(telco)
+```
+
+# Variáveis qualitativas
+## Informações sobre o clinte
+
+```{r}
+grid.arrange(ggplot(telco, aes(x=gender, fill=Churn))+ geom_bar(position = "dodge"),
+             ggplot(telco, aes(x=SeniorCitizen, fill=Churn))+ geom_bar(position = "dodge"),
+             ggplot(telco, aes(x=Partner, fill=Churn))+ geom_bar(position = "dodge"),
+             ggplot(telco, aes(x=Dependents, fill=Churn))+ geom_bar(position = "dodge"), ncol=2)
+```
+
+## Serviços de telefone
+
+```{r fig3, fig.height = 3, fig.width = 7}
+grid.arrange(ggplot(telco, aes(x=PhoneService, fill=Churn))+ geom_bar(position = "dodge"),
+             ggplot(telco, aes(x=MultipleLines, fill=Churn))+ geom_bar(position = "dodge"), ncol=2)
+```
+
+## Serviços de internet
+
+```{r fig4, fig.height = 10, fig.width = 12}
+grid.arrange(ggplot(telco, aes(x=InternetService, fill=Churn))+ geom_bar(position = "dodge"),
+             ggplot(telco, aes(x=OnlineSecurity, fill=Churn))+ geom_bar(position = "dodge"),
+             ggplot(telco, aes(x=OnlineBackup, fill=Churn))+ geom_bar(position = "dodge"),
+             ggplot(telco, aes(x=DeviceProtection, fill=Churn))+ geom_bar(position = "dodge"),
+             ggplot(telco, aes(x=TechSupport, fill=Churn))+ geom_bar(position = "dodge"),
+             ggplot(telco, aes(x=StreamingTV, fill=Churn))+ geom_bar(position = "dodge"),
+             ggplot(telco, aes(x=StreamingMovies, fill=Churn))+ geom_bar(position = "dodge"), ncol=3)
+```
+
+
+## Pagamento e contrato
+
+```{r fig5, fig.height = 3, fig.width = 7}
+grid.arrange(ggplot(telco, aes(x=Contract, fill=Churn))+ geom_bar(position = "dodge"),
+             ggplot(telco, aes(x=PaperlessBilling, fill=Churn))+ geom_bar(position = "dodge"), ncol=2)
+```
+
+```{r fig6, fig.height = 3, fig.width = 7}
+ggplot(telco, aes(x=PaymentMethod, fill=Churn))+ geom_bar(position = "dodge")
+```
+
+## Churn
+
+```{r fig7, fig.height = 3, fig.width = 4}
+ggplot(telco, aes(x=Churn, fill=Churn))+ geom_bar(position = "dodge")
+```
+
+
+# Criando Modelo
+## Balanceando base
+```{r}
+options(scipen=999)
+set.seed(123)
+
+table(telco$Churn)
+
+Base1 <- subset(telco, telco$Churn=="Yes")
+Base0 <- subset(telco, telco$Churn=="No")
+dt = sort(sample(nrow(Base0), 1869))
+Amostra_0 <- Base0[dt,]
+base_balanceada = rbind(Base1, Amostra_0)
+table(base_balanceada$Churn)
+```
+
+## Modelo glm
+
+```{r}
+modelo <- glm(Churn ~
+                .,
+              family=binomial(link='logit'),data=base_balanceada)
+summary(modelo)
+
+pred = predict(modelo,telco, type = "response")
+```
+
+## Criando uma nova base com a base original+valores preditos
+
+```{r}
+base_final = cbind(telco, pred)
+head(base_final)
+```
+
+## Criando a resposta final usando o ponto de corte
+
+```{r}
+base_final$resposta <- as.factor(ifelse(base_final$pred>0.7, "Yes", "No"))
+head(base_final)
+```
+
+## Tabela de classificação
+
+```{r}
+table(base_final$Churn,base_final$resposta)
+```
+
+# Removendo variáveis utilizando 90% de confiança utilizando metódo de seleção Backward
+Chegamos ao resultado na décima quinta iteração
+
+```{r}
+base_balanceada2 <- dummy_cols(base_balanceada, 
+                               select_columns = c("MultipleLines", "InternetService", "OnlineSecurity", "OnlineBackup", "DeviceProtection",
+                                                         "TechSupport", "StreamingTV", "StreamingMovies ", "Contract", "PaymentMethod"),
+                                                          remove_first_dummy = TRUE)
+base_balanceada2 <- base_balanceada2[, -c(7,8,9,10,11,12,13,14,15,17)]
+names(base_balanceada2) <- gsub(" ", "", names(base_balanceada2))
+names(base_balanceada2) <- gsub("\\(", "", names(base_balanceada2))
+names(base_balanceada2) <- gsub(")", "", names(base_balanceada2))
+str(base_balanceada2)
+
+modelo15 <- glm(Churn ~
+                  . - StreamingTV_Yes - PaymentMethod_Creditcardautomatic - TechSupport_Yes
+                - PaymentMethod_Mailedcheck - Partner - InternetService_No - OnlineSecurity_Nointernetservice
+                - OnlineBackup_Nointernetservice - DeviceProtection_Nointernetservice - TechSupport_Nointernetservice
+                - StreamingTV_Nointernetservice - gender - MultipleLines_Yes - InternetService_Fiberoptic,
+                family=binomial(link='logit'), data=base_balanceada2)
+summary(modelo15)
+```
+
+# Testando Modelo
+
+```{r}
+telco2 <- dummy_cols(telco, 
+                     select_columns = c("MultipleLines", "InternetService", "OnlineSecurity", "OnlineBackup", "DeviceProtection",
+                     "TechSupport", "StreamingTV", "StreamingMovies ", "Contract", "PaymentMethod"),
+                     remove_first_dummy = TRUE)
+
+telco2 <- telco2[, -c(7,8,9,10,11,12,13,14,15,17)]
+names(telco2) <- gsub(" ", "", names(telco2))
+names(telco2) <- gsub("\\(", "", names(telco2))
+names(telco2) <- gsub(")", "", names(telco2))
+str(telco2)
+
+pred = predict(modelo15, telco2, type = "response")
+```
+
+## Criando uma nova base com a base original+valores preditos
+
+```{r}
+base_final = cbind(telco, pred)
+head(base_final)
+```
+
+## Criar a resposta final usando o ponto de corte
+
+```{r}
+base_final$resposta <- as.factor(ifelse(base_final$pred>0.7, "Yes", "No"))
+head(base_final)
+```
+
+## Tabela de classificação
+
+```{r}
+confusionMatrix(base_final$Churn, base_final$resposta)
+```
+
